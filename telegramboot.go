@@ -205,13 +205,6 @@ func main() {
 				}
 			}
 
-			if update.Message.Contact != nil && update.Message.Contact.PhoneNumber != "" {
-				if !checkPhone(&update, &tgUser) {
-					msg = requestPhone(chatID)
-					msg.ReplyToMessageID = update.Message.MessageID
-				}
-			}
-
 			//Ответ на любое другое сообщение
 			if !checkPhone(&update, &tgUser) {
 				msg = requestPhone(chatID)
