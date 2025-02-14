@@ -374,8 +374,8 @@ func main() {
 						}
 						msg = createMenu(chatID, currentOperation[chatID])
 					}
-					//Обработки ответов пользователя для работы с объектом
 				} else {
+					//Обработки ответов пользователя для работы с объектом
 
 				}
 			} else {
