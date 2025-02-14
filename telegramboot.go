@@ -1,11 +1,11 @@
 package main
 
 import (
-	//	"context"
+	"context"
 	"encoding/json"
-	//	"github.com/EkzikP/sdk-andromeda-go"
+	"fmt"
+	"github.com/EkzikP/sdk-andromeda-go"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	//	"github.com/pkg/errors"
 	"log"
 	"os"
 	"strconv"
@@ -19,13 +19,21 @@ type (
 		PhoneEngineer    map[string]string `json:"phone_engineer"`     //Список телефонов инженеров ПО "Центр охраны"
 	}
 
-	//operation struct {
-	//	numberObject   string
-	//	currentRequest string
-	//	prevMenu       string
-	//	checkPanicId   string
-	//	changedUserId  string
-	//}
+	operation struct {
+		numberObject   string
+		object         andromeda.GetSitesResponse
+		customers      []andromeda.GetCustomerResponse
+		idPinedMessage int
+		currentRequest string
+		prevMenu       string
+		checkPanicId   string
+		changedUserId  string
+	}
+
+	menu struct {
+		text         string
+		callbackData string
+	}
 )
 
 // readUsers читает файл users.json с ID чата и телефонами пользователей, сохраняет их в map[string]string
@@ -151,26 +159,144 @@ func requestPhone(chatID int64) tgbotapi.MessageConfig {
 		Selective:       true,
 	}
 
-	msg := tgbotapi.NewMessage(chatID, "Oтправьте ваш номер телефона, нажав на кнопку ниже.")
+	msg := tgbotapi.NewMessage(chatID, "Отправьте ваш номер телефона, нажав на кнопку ниже.")
 	msg.ReplyMarkup = &keyboard
 
 	return msg
 }
 
+// checkNumberObject проверяет ввод пользователем номера объекта
+func checkNumberObject(text string) (string, bool) {
+
+	num, err := strconv.Atoi(text)
+	if err != nil {
+		return "Номер объекта введен некорректно!", false
+	}
+
+	if num < 1 || num > 9999 {
+		return "Номер объекта введен некорректно!", false
+	}
+	return "", true
+}
+
+// findObject получает объект по номеру
+func findObject(numberObject string, confSDK andromeda.Config, client *andromeda.Client, ctx *context.Context) (andromeda.GetSitesResponse, error) {
+
+	getSiteRequest := andromeda.GetSitesInput{
+		Id:     numberObject,
+		Config: confSDK,
+	}
+
+	getSiteResponse, err := client.GetSites(*ctx, getSiteRequest)
+	if err != nil {
+		return andromeda.GetSitesResponse{}, err
+	}
+	return getSiteResponse, nil
+}
+
+// checkUserRights проверяет права пользователя
+func checkUserRights(object andromeda.GetSitesResponse, currentOperation *map[int64]operation, chatID int64, confSDK andromeda.Config, tgUser *map[string]string, phoneEngineer map[string]string, client *andromeda.Client, ctx *context.Context) bool {
+
+	getCustomersRequest := andromeda.GetCustomersInput{
+		SiteId: object.Id,
+		Config: confSDK,
+	}
+
+	getCustomersResponse, err := client.Customers(*ctx, getCustomersRequest)
+	if err != nil {
+		return false
+	}
+
+	var useRights bool
+	phoneUser := (*tgUser)[strconv.FormatInt(chatID, 10)]
+	for _, customer := range getCustomersResponse {
+		var phoneCustomer string
+		switch len(customer.ObjCustPhone1) {
+		case 12:
+			phoneCustomer = customer.ObjCustPhone1
+		case 11:
+			phoneCustomer = "+7" + customer.ObjCustPhone1[1:]
+		case 10:
+			phoneCustomer = "+7" + customer.ObjCustPhone1
+		default:
+			phoneCustomer = ""
+		}
+		if phoneUser == phoneCustomer {
+			useRights = true
+			break
+		}
+	}
+
+	if !useRights && !isEngineer(phoneUser, phoneEngineer) {
+		return false
+	}
+
+	(*currentOperation)[chatID] = operation{
+		numberObject:   strconv.Itoa(object.AccountNumber),
+		object:         object,
+		customers:      getCustomersResponse,
+		idPinedMessage: 0,
+		currentRequest: "",
+		prevMenu:       "",
+		checkPanicId:   "",
+		changedUserId:  "",
+	}
+	return true
+}
+
+// checkPhone проверяет права инженера
+func isEngineer(phone string, phoneEngineer map[string]string) bool {
+	if _, ok := phoneEngineer[phone]; ok {
+		return true
+	}
+	return false
+}
+
+// createMainMenu создает меню
+func createMenu(chatId int64, operation operation) tgbotapi.MessageConfig {
+
+	msg := createMainMenu(chatId, operation)
+	return msg
+}
+
+func createMainMenu(chatID int64, operation operation) tgbotapi.MessageConfig {
+	mainMenu := []menu{
+		{"Получить список ответственных лиц объекта", "GetCustomers"},
+		{"Проверка КТС", "ChecksKTS"},
+		{"Управление доступом в MyAlarm (в работе)", "MyAlarm"},
+		{"Операции с карточкой объектов (не сделано)", "Object"},
+		{"Управление разделами объекта (не сделано)", "Sections"},
+		{"Управление шлейфами (не сделано)", "Shift"},
+		{"Завершить работу с объектом", "Finish"},
+	}
+
+	keyboard := tgbotapi.InlineKeyboardMarkup{}
+	for _, button := range mainMenu {
+		var row []tgbotapi.InlineKeyboardButton
+		btn := tgbotapi.NewInlineKeyboardButtonData(button.text, button.callbackData)
+		row = append(row, btn)
+		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, row)
+	}
+	text := fmt.Sprintf("Работа с объектом %s!\nВыберите пункт меню:", operation.numberObject)
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = &keyboard
+	return msg
+}
+
 func main() {
 
-	//	ctx := context.Background()
+	ctx := context.Background()
 
 	tgUser := *readUsers()
 	configuration := readConfig()
 
 	//Создаем структуру с общими параметрами для SDK
-	//	confSDK := andromeda.Config{
-	//		ApiKey: configuration.ApiKey,
-	//		Host:   configuration.Host,
-	//	}
+	confSDK := andromeda.Config{
+		ApiKey: configuration.ApiKey,
+		Host:   configuration.Host,
+	}
 
-	//	currentOperation := make(map[int64]operation)
+	currentOperation := make(map[int64]operation)
 
 	bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
 	if err != nil {
@@ -189,36 +315,77 @@ func main() {
 
 		var msg tgbotapi.MessageConfig
 
-		chatID := update.Message.Chat.ID
+		client := andromeda.NewClient()
 
 		if update.Message != nil {
 
-			if update.Message.IsCommand() {
+			chatID := update.Message.Chat.ID
 
-				if !checkPhone(&update, &tgUser) {
-					msg = requestPhone(chatID)
-					msg.ReplyToMessageID = update.Message.MessageID
-				} else {
-					msg = tgbotapi.NewMessage(update.Message.Chat.ID, "Введите пультовый номер объекта!")
-					msg.ReplyToMessageID = update.Message.MessageID
-					//			currentOperation := make(map[int64]operation)
+			if update.Message.Chat.IsPrivate() {
+
+				if update.Message.IsCommand() {
+
+					if !checkPhone(&update, &tgUser) {
+						msg = requestPhone(chatID)
+						msg.ReplyToMessageID = update.Message.MessageID
+					} else {
+						currentOperation[chatID] = operation{}
+						msg = tgbotapi.NewMessage(update.Message.Chat.ID, "Введите пультовый номер объекта!")
+						msg.ReplyToMessageID = update.Message.MessageID
+					}
 				}
-			}
 
-			//Ответ на любое другое сообщение
-			if !checkPhone(&update, &tgUser) {
-				msg = requestPhone(chatID)
-				msg.ReplyToMessageID = update.Message.MessageID
+				//Проверка номера объекта и прав пользователя для работы с этим объектом
+				if currentOperation[chatID].numberObject == "" {
+					if !checkPhone(&update, &tgUser) {
+						msg = requestPhone(chatID)
+						msg.ReplyToMessageID = update.Message.MessageID
+					} else if message, ok := checkNumberObject(update.Message.Text); !ok {
+						text := fmt.Sprintf("%s\nВведите пультовый номер объекта!", message)
+						msg = tgbotapi.NewMessage(update.Message.Chat.ID, text)
+						msg.ReplyToMessageID = update.Message.MessageID
+					} else if object, err := findObject(update.Message.Text, confSDK, client, &ctx); err != nil {
+						text := fmt.Sprintf("%s\nВведите пультовый номер объекта!", err)
+						msg = tgbotapi.NewMessage(update.Message.Chat.ID, text)
+						msg.ReplyToMessageID = update.Message.MessageID
+					} else if !checkUserRights(object, &currentOperation, chatID, confSDK, &tgUser, configuration.PhoneEngineer, client, &ctx) {
+						text := fmt.Sprintf("У вас нет прав на этот объект!\nВведите пультовый номер объекта!")
+						msg = tgbotapi.NewMessage(update.Message.Chat.ID, text)
+						msg.ReplyToMessageID = update.Message.MessageID
+					} else {
+						msg = tgbotapi.NewMessage(chatID, "Работа с объектом "+update.Message.Text)
+						msg.ReplyToMessageID = update.Message.MessageID
+						outMsg, _ := bot.Send(msg)
+						pinMessage := tgbotapi.PinChatMessageConfig{
+							ChatID:              chatID,
+							MessageID:           outMsg.MessageID,
+							DisableNotification: false,
+						}
+						_, _ = bot.Send(pinMessage)
+						currentOperation[chatID] = operation{
+							numberObject:   currentOperation[chatID].numberObject,
+							object:         currentOperation[chatID].object,
+							customers:      currentOperation[chatID].customers,
+							idPinedMessage: pinMessage.MessageID,
+							currentRequest: currentOperation[chatID].currentRequest,
+							prevMenu:       currentOperation[chatID].prevMenu,
+							checkPanicId:   currentOperation[chatID].checkPanicId,
+							changedUserId:  currentOperation[chatID].changedUserId,
+						}
+						msg = createMenu(chatID, currentOperation[chatID])
+					}
+					//Обработки ответов пользователя для работы с объектом
+				} else {
+
+				}
 			} else {
-				msg = tgbotapi.NewMessage(update.Message.Chat.ID, "Введите пультовый номер объекта!")
+				msg = tgbotapi.NewMessage(update.Message.Chat.ID, "Бот работает только в приватных чатах")
 				msg.ReplyToMessageID = update.Message.MessageID
-				//				currentOperation := make(map[int64]operation)
 			}
 		}
 
 		if update.CallbackQuery != nil && update.CallbackQuery.Message != nil {
 		}
-
 		_, _ = bot.Send(msg)
 	}
 }
