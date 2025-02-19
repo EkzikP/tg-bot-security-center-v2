@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/EkzikP/sdk-andromeda-go"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/pkg/errors"
 	"log"
 	"os"
 	"strconv"
@@ -284,11 +283,11 @@ func createMainMenu(chatID int64, operation operation) tgbotapi.MessageConfig {
 }
 
 // addBtnBack добавляет кнопку назад к сообщениям
-func addButtons(currentRequest string, err error) tgbotapi.InlineKeyboardMarkup {
+func addButtons(currentRequest string, enableResult bool) tgbotapi.InlineKeyboardMarkup {
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup()
 
-	if currentRequest == "ChecksKTS" && err == nil {
+	if (currentRequest == "ChecksKTS" || currentRequest == "ResultCheckKTS") && enableResult {
 		btnKTS := tgbotapi.NewInlineKeyboardButtonData("Получить результат проверки КТС", "ResultCheckKTS")
 		var rowKTS []tgbotapi.InlineKeyboardButton
 		rowKTS = append(rowKTS, btnKTS)
@@ -311,85 +310,79 @@ func addButtons(currentRequest string, err error) tgbotapi.InlineKeyboardMarkup 
 // checksKTSRequest проверка КТС
 func checksKTSRequest(currentOperation *map[int64]operation, chatID int64, confSDK andromeda.Config, client *andromeda.Client, ctx context.Context) tgbotapi.MessageConfig {
 
-	PostCheckPanicRequest := andromeda.PostCheckPanicInput{
-		SiteId: (*currentOperation)[chatID].object.Id,
-		Config: confSDK,
-	}
-	PostCheckPanicResponse, err := client.PostCheckPanic(ctx, PostCheckPanicRequest)
-	if err != nil {
-		msg := tgbotapi.NewMessage(chatID, "Не удалось получить данные")
-		msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, err)
-		return msg
-	}
-
-	PostCheckPanic := map[string]string{
-		"has alarm":                   "по объекту есть тревога, проверка КТС запрещена",
-		"already run":                 "по объекту уже выполняется проверка КТС",
-		"success":                     "проверка КТС начата",
-		"error":                       "при выполнении запроса произошла ошибка",
-		"invalid checkInterval value": "для параметра checkInterval задано значение, выходящее за пределы допустимого диапазона",
-	}
-
-	if PostCheckPanicResponse.Description != "success" {
-		msg := tgbotapi.NewMessage(chatID, PostCheckPanic[PostCheckPanicResponse.Description])
-		err = errors.New(PostCheckPanic[PostCheckPanicResponse.Description])
-		msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, err)
-		return msg
-	}
-
-	(*currentOperation)[chatID] = operation{
-		numberObject:   (*currentOperation)[chatID].numberObject,
-		object:         (*currentOperation)[chatID].object,
-		customers:      (*currentOperation)[chatID].customers,
-		currentRequest: (*currentOperation)[chatID].currentRequest,
-		prevMenu:       (*currentOperation)[chatID].prevMenu,
-		checkPanicId:   PostCheckPanicResponse.CheckPanicId,
-		changedUserId:  (*currentOperation)[chatID].changedUserId,
-	}
-	text := fmt.Sprintf("%s\nВ течении 180 сек. нажмите кнпку КТС.\nИ нажмите кнопку \"Получить результат проверки КТС\"", PostCheckPanic[PostCheckPanicResponse.Description])
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, nil)
-	return msg
-
-	if update.CallbackQuery != nil && update.CallbackQuery.Message != nil {
-		if update.CallbackQuery.Data == "ResultCheckKTS" {
-			GetCheckPanicRequest := andromeda.GetCheckPanicInput{
-				CheckPanicId: (*currentOperation)[chatID].checkPanicId,
-				Config:       apiHost,
-			}
-
-			id := (*currentOperation)[chatID].numberObject
-
-			client, _, err := validateUser(ctx, *tgUser, configuration, chatID, id, apiHost)
-			if err != nil {
-				msg := tgbotapi.NewMessage(chatID, err.Error())
-				msg.ReplyMarkup = addBtnBack()
-				return msg
-			}
-
-			GetCheckPanicResponse, err := client.GetCheckPanic(ctx, GetCheckPanicRequest)
-			if err != nil {
-				msg := tgbotapi.NewMessage(chatID, err.Error())
-				msg.ReplyMarkup = addBtnBack()
-				return msg
-			}
-
-			CheckPanicResponse := map[string]string{
-				"not found":                   "проверка с КТС не найдена",
-				"in progress":                 "проверка КТС продолжается (не завершена): КТС не получена, тайм-аут не истек",
-				"success":                     "проверка КТС успешно завершена",
-				"success, interval continues": "проверка КТС успешно завершена, но продолжается отсчет интервала проверки",
-				"time out":                    "проверка КТС завершена с ошибкой: истек интервал ожидания события КТС",
-				"error":                       "при выполнении запроса произошла ошибка",
-			}
-			msg := tgbotapi.NewMessage(chatID, CheckPanicResponse[GetCheckPanicResponse.Description])
-			msg.ReplyMarkup = addBtnBack()
+	if (*currentOperation)[chatID].currentRequest == "ChecksKTS" {
+		PostCheckPanicRequest := andromeda.PostCheckPanicInput{
+			SiteId: (*currentOperation)[chatID].object.Id,
+			Config: confSDK,
+		}
+		PostCheckPanicResponse, err := client.PostCheckPanic(ctx, PostCheckPanicRequest)
+		if err != nil {
+			msg := tgbotapi.NewMessage(chatID, "Не удалось получить данные")
+			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
 			return msg
 		}
-	}
 
-	msg := tgbotapi.NewMessage(chatID, "Введите номер объекта для получения информации")
-	msg.ReplyMarkup = addBtnBack()
+		PostCheckPanic := map[string]string{
+			"has alarm":                   "по объекту есть тревога, проверка КТС запрещена",
+			"already runnig":              "по объекту уже выполняется проверка КТС",
+			"success":                     "проверка КТС начата",
+			"error":                       "при выполнении запроса произошла ошибка",
+			"invalid checkInterval value": "для параметра checkInterval задано значение, выходящее за пределы допустимого диапазона",
+		}
+
+		if PostCheckPanicResponse.Description != "success" {
+			msg := tgbotapi.NewMessage(chatID, PostCheckPanic[PostCheckPanicResponse.Description])
+			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+			return msg
+		}
+
+		(*currentOperation)[chatID] = operation{
+			numberObject:   (*currentOperation)[chatID].numberObject,
+			object:         (*currentOperation)[chatID].object,
+			customers:      (*currentOperation)[chatID].customers,
+			currentRequest: (*currentOperation)[chatID].currentRequest,
+			prevMenu:       (*currentOperation)[chatID].prevMenu,
+			checkPanicId:   PostCheckPanicResponse.CheckPanicId,
+			changedUserId:  (*currentOperation)[chatID].changedUserId,
+		}
+
+		text := fmt.Sprintf("%s\nВ течении 180 сек. нажмите кнпку КТС.\nИ нажмите кнопку \"Получить результат проверки КТС\"", PostCheckPanic[PostCheckPanicResponse.Description])
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, true)
+		return msg
+	} else if (*currentOperation)[chatID].currentRequest == "ResultCheckKTS" {
+
+		GetCheckPanicRequest := andromeda.GetCheckPanicInput{
+			CheckPanicId: (*currentOperation)[chatID].checkPanicId,
+			Config:       confSDK,
+		}
+
+		GetCheckPanicResponse, err := client.GetCheckPanic(ctx, GetCheckPanicRequest)
+		if err != nil {
+			msg := tgbotapi.NewMessage(chatID, err.Error())
+			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, true)
+			return msg
+		}
+
+		CheckPanicResponse := map[string]string{
+			"not found":                   "проверка с КТС не найдена",
+			"in progress":                 "проверка КТС продолжается (не завершена): КТС не получена, тайм-аут не истек",
+			"success":                     "проверка КТС успешно завершена",
+			"success, interval continues": "проверка КТС успешно завершена, но продолжается отсчет интервала проверки",
+			"time out":                    "проверка КТС завершена с ошибкой: истек интервал ожидания события КТС",
+			"error":                       "при выполнении запроса произошла ошибка",
+		}
+
+		msg := tgbotapi.NewMessage(chatID, CheckPanicResponse[GetCheckPanicResponse.Description])
+		if GetCheckPanicResponse.Description == "in progress" {
+			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, true)
+		} else {
+			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+		}
+		return msg
+	}
+	msg := tgbotapi.NewMessage(chatID, "Неизвестная команда")
+	msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
 	return msg
 }
 
@@ -449,6 +442,9 @@ func main() {
 						if !checkPhone(&update, &tgUser) {
 							msg = requestPhone(chatID)
 							msg.ReplyToMessageID = update.Message.MessageID
+						} else if update.Message.Contact != nil {
+							msg = tgbotapi.NewMessage(update.Message.Chat.ID, "Введите пультовый номер объекта!")
+							msg.ReplyToMessageID = update.Message.MessageID
 						} else if message, ok := checkNumberObject(update.Message.Text); !ok {
 							text := fmt.Sprintf("%s\nВведите пультовый номер объекта!", message)
 							msg = tgbotapi.NewMessage(update.Message.Chat.ID, text)
@@ -493,7 +489,6 @@ func main() {
 			if update.CallbackQuery.Data == "Finish" {
 				text := fmt.Sprintf("Завершена работа с объектом %s", currentOperation[chatID].numberObject)
 				msg = tgbotapi.NewMessage(chatID, text)
-				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
 				_, _ = bot.Send(msg)
 				unpinMessage := tgbotapi.UnpinAllChatMessagesConfig{
 					ChatID: chatID,
@@ -516,8 +511,8 @@ func main() {
 					customers:      currentOperation[chatID].customers,
 					currentRequest: "",
 					prevMenu:       currentOperation[chatID].prevMenu,
-					checkPanicId:   currentOperation[chatID].checkPanicId,
-					changedUserId:  currentOperation[chatID].changedUserId,
+					checkPanicId:   "",
+					changedUserId:  "",
 				}
 				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
 				msg = createMenu(chatID, currentOperation[chatID])
@@ -538,19 +533,19 @@ func main() {
 					text += fmt.Sprintf("№: %d\nФИО: %s\nТел.: %s\n\n", customer.UserNumber, customer.ObjCustName, customer.ObjCustPhone1)
 				}
 				msg = tgbotapi.NewMessage(chatID, text)
-				msg.ReplyMarkup = addButtons(currentOperation[chatID].currentRequest, nil)
-			} else if update.CallbackQuery.Data == "ChecksKTS" {
+				msg.ReplyMarkup = addButtons(currentOperation[chatID].currentRequest, false)
+			} else if update.CallbackQuery.Data == "ChecksKTS" || update.CallbackQuery.Data == "ResultCheckKTS" {
 				currentOperation[chatID] = operation{
 					numberObject:   currentOperation[chatID].numberObject,
 					object:         currentOperation[chatID].object,
 					customers:      currentOperation[chatID].customers,
-					currentRequest: "ChecksKTS",
+					currentRequest: update.CallbackQuery.Data,
 					prevMenu:       "",
-					checkPanicId:   "",
+					checkPanicId:   currentOperation[chatID].checkPanicId,
 					changedUserId:  "",
 				}
 				msg = checksKTSRequest(&currentOperation, chatID, confSDK, client, ctx)
-				msg.ReplyToMessageID = update.Message.MessageID
+				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
 
 			}
 		}
