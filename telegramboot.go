@@ -330,7 +330,13 @@ func checksKTSRequest(currentOperation *map[int64]operation, chatID int64, confS
 			"invalid checkInterval value": "для параметра checkInterval задано значение, выходящее за пределы допустимого диапазона",
 		}
 
-		if PostCheckPanicResponse.Description != "success" {
+		if PostCheckPanicResponse.Description == "already runnig" {
+			text := fmt.Sprintf("По объекту уже выполняется проверка КТС.\nДождитесь автоматического завершения проверки (макс. 3 мин.) или " +
+				"отправьте тревогу КТС, для завершения ранее начатой проверки.\nИ повторите попытку снова.")
+			msg := tgbotapi.NewMessage(chatID, text)
+			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+			return msg
+		} else if PostCheckPanicResponse.Description != "success" {
 			msg := tgbotapi.NewMessage(chatID, PostCheckPanic[PostCheckPanicResponse.Description])
 			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
 			return msg
@@ -469,7 +475,7 @@ func main() {
 							_, _ = bot.Send(pinMessage)
 							msg = createMenu(chatID, currentOperation[chatID])
 						}
-					} else if update.Message.Text != "" && currentOperation[chatID].currentRequest == "" {
+					} else if update.Message.Text != "" { //&& currentOperation[chatID].currentRequest == "" {
 						//Обработки ответов пользователя для работы с объектом
 						msg = tgbotapi.NewMessage(chatID, "Работа с объектом "+update.Message.Text)
 						msg.ReplyToMessageID = update.Message.MessageID
