@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/EkzikP/sdk-andromeda-go"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/pkg/errors"
 	"log"
 	"os"
 	"strconv"
@@ -123,26 +124,19 @@ func checkPhone(update *tgbotapi.Update, tgUser *map[string]string) bool {
 		return true
 	}
 
-	var contactPhone string
-	switch len(update.Message.Contact.PhoneNumber) {
-	case 11:
-		contactPhone = "+7" + update.Message.Contact.PhoneNumber[1:]
-	case 12:
-		contactPhone = update.Message.Contact.PhoneNumber
-	case 10:
-		contactPhone = "+7" + update.Message.Contact.PhoneNumber
-	default:
+	contactPhone, err := checkFormatPhone(update.Message.Contact.PhoneNumber)
+	if err != nil {
 		return false
 	}
 
 	if phone, ok := (*tgUser)[chatID]; !ok {
-		err := addUser(chatID, contactPhone, tgUser)
+		err = addUser(chatID, contactPhone, tgUser)
 		if err != nil {
 			return false
 		}
 		return true
 	} else if phone != contactPhone {
-		err := addUser(chatID, contactPhone, tgUser)
+		err = addUser(chatID, contactPhone, tgUser)
 		if err != nil {
 			return false
 		}
@@ -296,6 +290,9 @@ func createMainMenu(chatID int64, operation *operation) tgbotapi.MessageConfig {
 		{"Управление шлейфами (не сделано)", "Shift"},
 		{"Завершить работу с объектом", "Finish"},
 	}
+
+	operation.changeValue("currentMenu", "MainMenu")
+	operation.changeValue("currentRequest", "")
 
 	keyboard := tgbotapi.InlineKeyboardMarkup{}
 	for _, button := range mainMenu {
@@ -488,6 +485,7 @@ func getUsersMyAlarm(ctx context.Context, client *andromeda.Client, confSDK andr
 	return msg
 }
 
+// haveMyAlarmRights проверяет права пользователя на систему MyAlarm и получает данные о пользователях системы MyAlarm
 func haveMyAlarmRights(ctx context.Context, client *andromeda.Client, confSDK andromeda.Config, operation *operation, chatID int64, tgUser map[string]string, phoneEngineer map[string]string) bool {
 
 	usersMyAlarmRequest := andromeda.GetUsersMyAlarmInput{
@@ -518,6 +516,97 @@ func haveMyAlarmRights(ctx context.Context, client *andromeda.Client, confSDK an
 	}
 
 	return true
+}
+
+// getUserObjectMyAlarm получает объекты пользователя MyAlarm
+func getUserObjectMyAlarm(tgUser map[string]string, chatID int64, phoneEngineer map[string]string, operation *operation, update *tgbotapi.Update, ctx context.Context, client *andromeda.Client, confSDK andromeda.Config) tgbotapi.MessageConfig {
+
+	var err error
+
+	phone := tgUser[strconv.FormatInt(chatID, 10)]
+
+	if isEngineer(phone, phoneEngineer) {
+		if update.Message == nil {
+			msg := tgbotapi.NewMessage(chatID, "Введите номер телефона пользователя в формате: +7xxxxxxxxxx")
+			msg.ReplyMarkup = addButtons(operation.currentRequest, false)
+			return msg
+		} else {
+			phone, err = checkFormatPhone(update.Message.Text)
+			if err != nil {
+				msg := tgbotapi.NewMessage(chatID, err.Error())
+				msg.ReplyMarkup = addButtons(operation.currentRequest, false)
+				return msg
+			}
+		}
+	}
+
+	userObjectMyAlarmRequest := andromeda.GetUserObjectMyAlarmInput{
+		Phone:  phone,
+		Config: confSDK,
+	}
+
+	userObjectMyAlarmResponse, err := client.GetUserObjectMyAlarm(ctx, userObjectMyAlarmRequest)
+	if err != nil {
+		msg := tgbotapi.NewMessage(chatID, err.Error())
+		msg.ReplyMarkup = addButtons(operation.currentRequest, false)
+		return msg
+	}
+	if len(userObjectMyAlarmResponse) == 0 {
+		msg := tgbotapi.NewMessage(chatID, "У пользователя с номером "+phone+" нет объектов в приложении MyAlarm")
+		msg.ReplyMarkup = addButtons(operation.currentRequest, false)
+		return msg
+	}
+
+	text := ""
+	for _, object := range userObjectMyAlarmResponse {
+		var kts string
+		var role string
+		if object.IsPanic {
+			kts = "Да"
+		} else {
+			kts = "Нет"
+		}
+
+		if object.Role == "admin" {
+			role = "Администратор"
+		} else {
+			role = "Пользователь"
+		}
+
+		getSiteRequest := andromeda.GetSitesInput{
+			Id:     object.ObjectGUID,
+			Config: confSDK,
+		}
+
+		getSiteResponse, err := client.GetSites(ctx, getSiteRequest)
+		if err != nil {
+			msg := tgbotapi.NewMessage(chatID, err.Error())
+			msg.ReplyMarkup = addButtons(operation.currentRequest, false)
+			return msg
+		}
+
+		text += fmt.Sprintf("№ объекта: %d\nНаименование: %s\nАдрес: %s\nРоль: %s\nКТС: %s\n\n", getSiteResponse.AccountNumber, getSiteResponse.Name, getSiteResponse.Address, role, kts)
+	}
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = addButtons(operation.currentRequest, false)
+	return msg
+}
+
+func checkFormatPhone(phone string) (string, error) {
+
+	var userPhone string
+
+	switch len(phone) {
+	case 11:
+		userPhone = "+7" + phone[1:]
+	case 12:
+		userPhone = phone
+	case 10:
+		userPhone = "+7" + phone
+	default:
+		return "", errors.New("Неверный формат номера телефона\nВведите номер телефона в формате: +7xxxxxxxxxx")
+	}
+	return userPhone, nil
 }
 
 func main() {
@@ -603,14 +692,20 @@ func main() {
 							_, _ = bot.Send(pinMessage)
 							msg = createMenu(chatID, currentOperation[chatID])
 						}
-					} else if update.Message.Text != "" { //&& currentOperation[chatID].currentRequest == "" {
-						//Обработки ответов пользователя для работы с объектом
-						msg = tgbotapi.NewMessage(chatID, "Работа с объектом "+update.Message.Text)
-						msg.ReplyToMessageID = update.Message.MessageID
-						currentOperation[chatID].changeValue("currentRequest", "")
-						currentOperation[chatID].changeValue("checkPanicId", "")
-						currentOperation[chatID].changeValue("changedUserId", "")
-						msg = createMenu(chatID, currentOperation[chatID])
+					} else if update.Message.Text != "" {
+						if isEngineer(tgUser[strconv.FormatInt(chatID, 10)], configuration.PhoneEngineer) &&
+							currentOperation[chatID].currentRequest == "GetUserObjectMyAlarm" {
+							msg = getUserObjectMyAlarm(tgUser, chatID, configuration.PhoneEngineer, currentOperation[chatID], &update, ctx, client, confSDK)
+							msg.ReplyToMessageID = update.Message.MessageID
+						} else {
+							//Обработки ответов пользователя для работы с объектом
+							msg = tgbotapi.NewMessage(chatID, "Работа с объектом "+update.Message.Text)
+							msg.ReplyToMessageID = update.Message.MessageID
+							currentOperation[chatID].changeValue("currentRequest", "")
+							currentOperation[chatID].changeValue("checkPanicId", "")
+							currentOperation[chatID].changeValue("changedUserId", "")
+							msg = createMenu(chatID, currentOperation[chatID])
+						}
 					}
 				}
 			} else {
@@ -623,7 +718,8 @@ func main() {
 
 			chatID := update.CallbackQuery.Message.Chat.ID
 
-			if update.CallbackQuery.Data == "Finish" {
+			switch update.CallbackQuery.Data {
+			case "Finish":
 				text := fmt.Sprintf("Завершена работа с объектом %s", currentOperation[chatID].numberObject)
 				msg = tgbotapi.NewMessage(chatID, text)
 				_, _ = bot.Send(msg)
@@ -634,37 +730,26 @@ func main() {
 
 				currentOperation[chatID] = newOperation()
 				msg = tgbotapi.NewMessage(chatID, "Введите пультовый номер объекта!")
-			} else if update.CallbackQuery.Data == "Back" {
+			case "Back":
 				text := fmt.Sprintf("Работа с объектом %s", currentOperation[chatID].numberObject)
 				if currentOperation[chatID].currentMenu == "MyAlarmMenu" && currentOperation[chatID].currentRequest == "MyAlarm" {
 					text += "\nПодменю MyAlarm"
 					msg = tgbotapi.NewMessage(chatID, text)
 					currentOperation[chatID].changeValue("currentRequest", "")
 					currentOperation[chatID].changeValue("currentMenu", "MainMenu")
-					currentOperation[chatID].changeValue("checkPanicId", "")
-					currentOperation[chatID].changeValue("changedUserId", "")
 				} else if currentOperation[chatID].currentMenu == "MyAlarmMenu" {
 					msg = tgbotapi.NewMessage(chatID, text)
 					text += "\nПодменю MyAlarm"
 					msg = tgbotapi.NewMessage(chatID, text)
 					currentOperation[chatID].changeValue("currentRequest", "MyAlarm")
-					currentOperation[chatID].changeValue("currentMenu", "MyAlarmMenu")
-					currentOperation[chatID].changeValue("checkPanicId", "")
-					currentOperation[chatID].changeValue("changedUserId", "")
 				} else {
 					msg = tgbotapi.NewMessage(chatID, text)
 					currentOperation[chatID].changeValue("currentRequest", "")
-					currentOperation[chatID].changeValue("checkPanicId", "")
-					currentOperation[chatID].changeValue("changedUserId", "")
 				}
 				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
 				msg = createMenu(chatID, currentOperation[chatID])
-
-			} else if update.CallbackQuery.Data == "GetCustomers" {
-				currentOperation[chatID].changeValue("currentRequest", "GetCustomers")
-				currentOperation[chatID].changeValue("currentMenu", "MainMenu")
-				currentOperation[chatID].changeValue("checkPanicId", "")
-				currentOperation[chatID].changeValue("changedUserId", "")
+			case "GetCustomers":
+				currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
 
 				text := ""
 				for _, customer := range currentOperation[chatID].customers {
@@ -672,28 +757,27 @@ func main() {
 				}
 				msg = tgbotapi.NewMessage(chatID, text)
 				msg.ReplyMarkup = addButtons(currentOperation[chatID].currentRequest, false)
-			} else if update.CallbackQuery.Data == "ChecksKTS" || update.CallbackQuery.Data == "ResultCheckKTS" {
+			case "ChecksKTS", "ResultCheckKTS":
 				currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
-				currentOperation[chatID].changeValue("currentMenu", "MainMenu")
-				currentOperation[chatID].changeValue("changedUserId", "")
 				msg = checksKTSRequest(currentOperation[chatID], chatID, confSDK, client, ctx)
 				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
-			} else if update.CallbackQuery.Data == "MyAlarm" {
+			case "MyAlarm":
 				if haveMyAlarmRights(ctx, client, confSDK, currentOperation[chatID], chatID, tgUser, configuration.PhoneEngineer) {
 					currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
 					currentOperation[chatID].changeValue("currentMenu", "MyAlarmMenu")
-					currentOperation[chatID].changeValue("checkPanicId", "")
-					currentOperation[chatID].changeValue("changedUserId", "")
 					msg = createMenu(chatID, currentOperation[chatID])
 				} else {
 					msg = tgbotapi.NewMessage(chatID, "У вас нет прав на работу с системой MyAlarm")
 					_, _ = bot.Send(msg)
 					msg = createMenu(chatID, currentOperation[chatID])
 				}
-			} else if update.CallbackQuery.Data == "GetUsersMyAlarm" {
+			case "GetUsersMyAlarm":
 				currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
-				currentOperation[chatID].changeValue("changedUserId", "")
 				msg = getUsersMyAlarm(ctx, client, confSDK, currentOperation[chatID], chatID)
+				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
+			case "GetUserObjectMyAlarm":
+				currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
+				msg = getUserObjectMyAlarm(tgUser, chatID, configuration.PhoneEngineer, currentOperation[chatID], &update, ctx, client, confSDK)
 				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
 			}
 		}
