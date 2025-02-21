@@ -36,6 +36,33 @@ type (
 	}
 )
 
+func newOperation() *operation {
+	return &operation{}
+}
+
+func (o *operation) changeValue(fieldName string, value interface{}) {
+
+	switch fieldName {
+	case "numberObject":
+		o.numberObject = value.(string)
+	case "object":
+		o.object = value.(andromeda.GetSitesResponse)
+	case "customers":
+		o.customers = value.([]andromeda.GetCustomerResponse)
+	case "usersMyAlarm":
+		o.usersMyAlarm = value.([]andromeda.UserMyAlarmResponse)
+	case "currentRequest":
+		o.currentRequest = value.(string)
+	case "currentMenu":
+		o.currentMenu = value.(string)
+	case "checkPanicId":
+		o.checkPanicId = value.(string)
+	case "changedUserId":
+		o.changedUserId = value.(string)
+	}
+
+}
+
 // readUsers читает файл users.json с ID чата и телефонами пользователей, сохраняет их в map[string]string
 func readUsers() *map[string]string {
 	file, err := os.Open("users.json")
@@ -195,7 +222,7 @@ func findObject(numberObject string, confSDK andromeda.Config, client *andromeda
 }
 
 // checkUserRights проверяет права пользователя
-func checkUserRights(object andromeda.GetSitesResponse, currentOperation *map[int64]operation, chatID int64, confSDK andromeda.Config, tgUser *map[string]string, phoneEngineer map[string]string, client *andromeda.Client, ctx *context.Context) bool {
+func checkUserRights(object andromeda.GetSitesResponse, operation *operation, chatID int64, confSDK andromeda.Config, tgUser *map[string]string, phoneEngineer map[string]string, client *andromeda.Client, ctx *context.Context) bool {
 
 	getCustomersRequest := andromeda.GetCustomersInput{
 		SiteId: object.Id,
@@ -231,15 +258,10 @@ func checkUserRights(object andromeda.GetSitesResponse, currentOperation *map[in
 		return false
 	}
 
-	(*currentOperation)[chatID] = operation{
-		numberObject:   strconv.Itoa(object.AccountNumber),
-		object:         object,
-		customers:      getCustomersResponse,
-		currentRequest: "",
-		currentMenu:    "MainMenu",
-		checkPanicId:   "",
-		changedUserId:  "",
-	}
+	operation.changeValue("numberObject", strconv.Itoa(object.AccountNumber))
+	operation.changeValue("object", object)
+	operation.changeValue("customers", getCustomersResponse)
+	operation.changeValue("currentMenu", "MainMenu")
 	return true
 }
 
@@ -252,7 +274,7 @@ func isEngineer(phone string, phoneEngineer map[string]string) bool {
 }
 
 // createMainMenu создает меню
-func createMenu(chatId int64, operation operation) tgbotapi.MessageConfig {
+func createMenu(chatId int64, operation *operation) tgbotapi.MessageConfig {
 
 	if operation.currentMenu == "MyAlarmMenu" {
 		msg := createMyAlarmMenu(chatId, operation)
@@ -264,7 +286,7 @@ func createMenu(chatId int64, operation operation) tgbotapi.MessageConfig {
 }
 
 // createMainMenu создает главное меню
-func createMainMenu(chatID int64, operation operation) tgbotapi.MessageConfig {
+func createMainMenu(chatID int64, operation *operation) tgbotapi.MessageConfig {
 	mainMenu := []menu{
 		{"Получить список ответственных лиц объекта", "GetCustomers"},
 		{"Проверка КТС", "ChecksKTS"},
@@ -289,7 +311,7 @@ func createMainMenu(chatID int64, operation operation) tgbotapi.MessageConfig {
 }
 
 // createMyAlarmMenu создает меню MyAlarm
-func createMyAlarmMenu(chatID int64, operation operation) tgbotapi.MessageConfig {
+func createMyAlarmMenu(chatID int64, operation *operation) tgbotapi.MessageConfig {
 	mainMenu := []menu{
 		{"Список пользователей MyAlarm объекта", "GetUsersMyAlarm"},
 		{"Список объектов пользователя MyAlarm", "GetUserObjectMyAlarm"},
@@ -339,17 +361,17 @@ func addButtons(currentRequest string, enableResult bool) tgbotapi.InlineKeyboar
 }
 
 // checksKTSRequest проверка КТС
-func checksKTSRequest(currentOperation *map[int64]operation, chatID int64, confSDK andromeda.Config, client *andromeda.Client, ctx context.Context) tgbotapi.MessageConfig {
+func checksKTSRequest(operation *operation, chatID int64, confSDK andromeda.Config, client *andromeda.Client, ctx context.Context) tgbotapi.MessageConfig {
 
-	if (*currentOperation)[chatID].currentRequest == "ChecksKTS" {
+	if operation.currentRequest == "ChecksKTS" {
 		PostCheckPanicRequest := andromeda.PostCheckPanicInput{
-			SiteId: (*currentOperation)[chatID].object.Id,
+			SiteId: operation.object.Id,
 			Config: confSDK,
 		}
 		PostCheckPanicResponse, err := client.PostCheckPanic(ctx, PostCheckPanicRequest)
 		if err != nil {
 			msg := tgbotapi.NewMessage(chatID, "Не удалось получить данные")
-			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+			msg.ReplyMarkup = addButtons(operation.currentRequest, false)
 			return msg
 		}
 
@@ -365,39 +387,31 @@ func checksKTSRequest(currentOperation *map[int64]operation, chatID int64, confS
 			text := fmt.Sprintf("По объекту уже выполняется проверка КТС.\nДождитесь автоматического завершения проверки (макс. 3 мин.) или " +
 				"отправьте тревогу КТС, для завершения ранее начатой проверки.\nИ повторите попытку снова.")
 			msg := tgbotapi.NewMessage(chatID, text)
-			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+			msg.ReplyMarkup = addButtons(operation.currentRequest, false)
 			return msg
 		} else if PostCheckPanicResponse.Description != "success" {
 			msg := tgbotapi.NewMessage(chatID, PostCheckPanic[PostCheckPanicResponse.Description])
-			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+			msg.ReplyMarkup = addButtons(operation.currentRequest, false)
 			return msg
 		}
 
-		(*currentOperation)[chatID] = operation{
-			numberObject:   (*currentOperation)[chatID].numberObject,
-			object:         (*currentOperation)[chatID].object,
-			customers:      (*currentOperation)[chatID].customers,
-			currentRequest: (*currentOperation)[chatID].currentRequest,
-			currentMenu:    (*currentOperation)[chatID].currentMenu,
-			checkPanicId:   PostCheckPanicResponse.CheckPanicId,
-			changedUserId:  (*currentOperation)[chatID].changedUserId,
-		}
+		operation.changeValue("checkPanicId", PostCheckPanicResponse.CheckPanicId)
 
 		text := fmt.Sprintf("%s\nВ течении 180 сек. нажмите кнпку КТС.\nИ нажмите кнопку \"Получить результат проверки КТС\"", PostCheckPanic[PostCheckPanicResponse.Description])
 		msg := tgbotapi.NewMessage(chatID, text)
-		msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, true)
+		msg.ReplyMarkup = addButtons(operation.currentRequest, true)
 		return msg
-	} else if (*currentOperation)[chatID].currentRequest == "ResultCheckKTS" {
+	} else if operation.currentRequest == "ResultCheckKTS" {
 
 		GetCheckPanicRequest := andromeda.GetCheckPanicInput{
-			CheckPanicId: (*currentOperation)[chatID].checkPanicId,
+			CheckPanicId: operation.checkPanicId,
 			Config:       confSDK,
 		}
 
 		GetCheckPanicResponse, err := client.GetCheckPanic(ctx, GetCheckPanicRequest)
 		if err != nil {
 			msg := tgbotapi.NewMessage(chatID, err.Error())
-			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, true)
+			msg.ReplyMarkup = addButtons(operation.currentRequest, true)
 			return msg
 		}
 
@@ -412,28 +426,28 @@ func checksKTSRequest(currentOperation *map[int64]operation, chatID int64, confS
 
 		msg := tgbotapi.NewMessage(chatID, CheckPanicResponse[GetCheckPanicResponse.Description])
 		if GetCheckPanicResponse.Description == "in progress" {
-			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, true)
+			msg.ReplyMarkup = addButtons(operation.currentRequest, true)
 		} else {
-			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+			msg.ReplyMarkup = addButtons(operation.currentRequest, false)
 		}
 		return msg
 	}
 	msg := tgbotapi.NewMessage(chatID, "Неизвестная команда")
-	msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+	msg.ReplyMarkup = addButtons(operation.currentRequest, false)
 	return msg
 }
 
 // getUsersMyAlarm получение данных о пользователях MyAlarm
-func getUsersMyAlarm(ctx context.Context, client *andromeda.Client, confSDK andromeda.Config, currentOperation *map[int64]operation, chatID int64) tgbotapi.MessageConfig {
+func getUsersMyAlarm(ctx context.Context, client *andromeda.Client, confSDK andromeda.Config, operation *operation, chatID int64) tgbotapi.MessageConfig {
 
 	usersMyAlarmRequest := andromeda.GetUsersMyAlarmInput{
-		SiteId: (*currentOperation)[chatID].object.Id,
+		SiteId: operation.object.Id,
 		Config: confSDK,
 	}
 	usersMyAlarmResponse, err := client.GetUsersMyAlarm(ctx, usersMyAlarmRequest)
 	if err != nil {
 		msg := tgbotapi.NewMessage(chatID, "Не удалось получить данные")
-		msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+		msg.ReplyMarkup = addButtons(operation.currentRequest, false)
 		return msg
 	}
 
@@ -463,45 +477,36 @@ func getUsersMyAlarm(ctx context.Context, client *andromeda.Client, confSDK andr
 		userMyAlarmResponse, err := client.GetCustomer(ctx, userMyAlarmRequest)
 		if err != nil {
 			msg := tgbotapi.NewMessage(chatID, "Не удалось получить данные")
-			msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+			msg.ReplyMarkup = addButtons(operation.currentRequest, false)
 			return msg
 		}
 
 		text += fmt.Sprintf("ФИО: %s\nТел.: %s\nРоль: %s\nКТС: %s\n\n", userMyAlarmResponse.ObjCustName, user.MyAlarmPhone, role, kts)
 	}
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+	msg.ReplyMarkup = addButtons(operation.currentRequest, false)
 	return msg
 }
 
-func haveMyAlarmRights(ctx context.Context, client *andromeda.Client, confSDK andromeda.Config, currentOperation *map[int64]operation, chatID int64, tgUser map[string]string, phoneEngineer map[string]string) bool {
+func haveMyAlarmRights(ctx context.Context, client *andromeda.Client, confSDK andromeda.Config, operation *operation, chatID int64, tgUser map[string]string, phoneEngineer map[string]string) bool {
 
 	usersMyAlarmRequest := andromeda.GetUsersMyAlarmInput{
-		SiteId: (*currentOperation)[chatID].object.Id,
+		SiteId: operation.object.Id,
 		Config: confSDK,
 	}
 	usersMyAlarmResponse, err := client.GetUsersMyAlarm(ctx, usersMyAlarmRequest)
 	if err != nil {
 		msg := tgbotapi.NewMessage(chatID, "Не удалось получить данные")
-		msg.ReplyMarkup = addButtons((*currentOperation)[chatID].currentRequest, false)
+		msg.ReplyMarkup = addButtons(operation.currentRequest, false)
 		return false
 	}
 
-	(*currentOperation)[chatID] = operation{
-		numberObject:   (*currentOperation)[chatID].numberObject,
-		object:         (*currentOperation)[chatID].object,
-		customers:      (*currentOperation)[chatID].customers,
-		usersMyAlarm:   usersMyAlarmResponse,
-		currentRequest: (*currentOperation)[chatID].currentRequest,
-		currentMenu:    (*currentOperation)[chatID].currentMenu,
-		checkPanicId:   (*currentOperation)[chatID].checkPanicId,
-		changedUserId:  (*currentOperation)[chatID].changedUserId,
-	}
+	operation.changeValue("usersMyAlarm", usersMyAlarmResponse)
 
 	phoneUser := tgUser[strconv.FormatInt(chatID, 10)]
 
 	var validUser bool
-	for _, user := range (*currentOperation)[chatID].usersMyAlarm {
+	for _, user := range operation.usersMyAlarm {
 		if user.MyAlarmPhone == phoneUser {
 			validUser = true
 			break
@@ -528,7 +533,7 @@ func main() {
 		Host:   configuration.Host,
 	}
 
-	currentOperation := make(map[int64]operation)
+	currentOperation := make(map[int64]*operation)
 
 	bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
 	if err != nil {
@@ -561,7 +566,7 @@ func main() {
 						msg = requestPhone(chatID)
 						msg.ReplyToMessageID = update.Message.MessageID
 					} else {
-						currentOperation[chatID] = operation{}
+						currentOperation[chatID] = newOperation()
 						msg = tgbotapi.NewMessage(update.Message.Chat.ID, "Введите пультовый номер объекта!")
 						msg.ReplyToMessageID = update.Message.MessageID
 					}
@@ -582,7 +587,7 @@ func main() {
 							text := fmt.Sprintf("%s\nВведите пультовый номер объекта!", err)
 							msg = tgbotapi.NewMessage(update.Message.Chat.ID, text)
 							msg.ReplyToMessageID = update.Message.MessageID
-						} else if !checkUserRights(object, &currentOperation, chatID, confSDK, &tgUser, configuration.PhoneEngineer, client, &ctx) {
+						} else if !checkUserRights(object, currentOperation[chatID], chatID, confSDK, &tgUser, configuration.PhoneEngineer, client, &ctx) {
 							text := fmt.Sprintf("У вас нет прав на этот объект!\nВведите пультовый номер объекта!")
 							msg = tgbotapi.NewMessage(update.Message.Chat.ID, text)
 							msg.ReplyToMessageID = update.Message.MessageID
@@ -602,15 +607,9 @@ func main() {
 						//Обработки ответов пользователя для работы с объектом
 						msg = tgbotapi.NewMessage(chatID, "Работа с объектом "+update.Message.Text)
 						msg.ReplyToMessageID = update.Message.MessageID
-						currentOperation[chatID] = operation{
-							numberObject:   currentOperation[chatID].numberObject,
-							object:         currentOperation[chatID].object,
-							customers:      currentOperation[chatID].customers,
-							currentRequest: "",
-							currentMenu:    currentOperation[chatID].currentMenu,
-							checkPanicId:   "",
-							changedUserId:  "",
-						}
+						currentOperation[chatID].changeValue("currentRequest", "")
+						currentOperation[chatID].changeValue("checkPanicId", "")
+						currentOperation[chatID].changeValue("changedUserId", "")
 						msg = createMenu(chatID, currentOperation[chatID])
 					}
 				}
@@ -633,60 +632,39 @@ func main() {
 				}
 				_, _ = bot.Send(unpinMessage)
 
-				currentOperation[chatID] = operation{}
+				currentOperation[chatID] = newOperation()
 				msg = tgbotapi.NewMessage(chatID, "Введите пультовый номер объекта!")
 			} else if update.CallbackQuery.Data == "Back" {
 				text := fmt.Sprintf("Работа с объектом %s", currentOperation[chatID].numberObject)
 				if currentOperation[chatID].currentMenu == "MyAlarmMenu" && currentOperation[chatID].currentRequest == "MyAlarm" {
 					text += "\nПодменю MyAlarm"
 					msg = tgbotapi.NewMessage(chatID, text)
-					currentOperation[chatID] = operation{
-						numberObject:   currentOperation[chatID].numberObject,
-						object:         currentOperation[chatID].object,
-						customers:      currentOperation[chatID].customers,
-						currentRequest: "",
-						currentMenu:    "MainMenu",
-						checkPanicId:   "",
-						changedUserId:  "",
-					}
+					currentOperation[chatID].changeValue("currentRequest", "")
+					currentOperation[chatID].changeValue("currentMenu", "MainMenu")
+					currentOperation[chatID].changeValue("checkPanicId", "")
+					currentOperation[chatID].changeValue("changedUserId", "")
 				} else if currentOperation[chatID].currentMenu == "MyAlarmMenu" {
 					msg = tgbotapi.NewMessage(chatID, text)
 					text += "\nПодменю MyAlarm"
 					msg = tgbotapi.NewMessage(chatID, text)
-					currentOperation[chatID] = operation{
-						numberObject:   currentOperation[chatID].numberObject,
-						object:         currentOperation[chatID].object,
-						customers:      currentOperation[chatID].customers,
-						currentRequest: "MyAlarm",
-						currentMenu:    "MyAlarmMenu",
-						checkPanicId:   "",
-						changedUserId:  "",
-					}
+					currentOperation[chatID].changeValue("currentRequest", "MyAlarm")
+					currentOperation[chatID].changeValue("currentMenu", "MyAlarmMenu")
+					currentOperation[chatID].changeValue("checkPanicId", "")
+					currentOperation[chatID].changeValue("changedUserId", "")
 				} else {
 					msg = tgbotapi.NewMessage(chatID, text)
-					currentOperation[chatID] = operation{
-						numberObject:   currentOperation[chatID].numberObject,
-						object:         currentOperation[chatID].object,
-						customers:      currentOperation[chatID].customers,
-						currentRequest: "",
-						currentMenu:    currentOperation[chatID].currentMenu,
-						checkPanicId:   "",
-						changedUserId:  "",
-					}
+					currentOperation[chatID].changeValue("currentRequest", "")
+					currentOperation[chatID].changeValue("checkPanicId", "")
+					currentOperation[chatID].changeValue("changedUserId", "")
 				}
 				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
 				msg = createMenu(chatID, currentOperation[chatID])
 
 			} else if update.CallbackQuery.Data == "GetCustomers" {
-				currentOperation[chatID] = operation{
-					numberObject:   currentOperation[chatID].numberObject,
-					object:         currentOperation[chatID].object,
-					customers:      currentOperation[chatID].customers,
-					currentRequest: "GetCustomers",
-					currentMenu:    "MainMenu",
-					checkPanicId:   "",
-					changedUserId:  "",
-				}
+				currentOperation[chatID].changeValue("currentRequest", "GetCustomers")
+				currentOperation[chatID].changeValue("currentMenu", "MainMenu")
+				currentOperation[chatID].changeValue("checkPanicId", "")
+				currentOperation[chatID].changeValue("changedUserId", "")
 
 				text := ""
 				for _, customer := range currentOperation[chatID].customers {
@@ -695,28 +673,17 @@ func main() {
 				msg = tgbotapi.NewMessage(chatID, text)
 				msg.ReplyMarkup = addButtons(currentOperation[chatID].currentRequest, false)
 			} else if update.CallbackQuery.Data == "ChecksKTS" || update.CallbackQuery.Data == "ResultCheckKTS" {
-				currentOperation[chatID] = operation{
-					numberObject:   currentOperation[chatID].numberObject,
-					object:         currentOperation[chatID].object,
-					customers:      currentOperation[chatID].customers,
-					currentRequest: update.CallbackQuery.Data,
-					currentMenu:    "MainMenu",
-					checkPanicId:   currentOperation[chatID].checkPanicId,
-					changedUserId:  "",
-				}
-				msg = checksKTSRequest(&currentOperation, chatID, confSDK, client, ctx)
+				currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
+				currentOperation[chatID].changeValue("currentMenu", "MainMenu")
+				currentOperation[chatID].changeValue("changedUserId", "")
+				msg = checksKTSRequest(currentOperation[chatID], chatID, confSDK, client, ctx)
 				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
 			} else if update.CallbackQuery.Data == "MyAlarm" {
-				if haveMyAlarmRights(ctx, client, confSDK, &currentOperation, chatID, tgUser, configuration.PhoneEngineer) {
-					currentOperation[chatID] = operation{
-						numberObject:   currentOperation[chatID].numberObject,
-						object:         currentOperation[chatID].object,
-						customers:      currentOperation[chatID].customers,
-						currentRequest: update.CallbackQuery.Data,
-						currentMenu:    "MyAlarmMenu",
-						checkPanicId:   "",
-						changedUserId:  "",
-					}
+				if haveMyAlarmRights(ctx, client, confSDK, currentOperation[chatID], chatID, tgUser, configuration.PhoneEngineer) {
+					currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
+					currentOperation[chatID].changeValue("currentMenu", "MyAlarmMenu")
+					currentOperation[chatID].changeValue("checkPanicId", "")
+					currentOperation[chatID].changeValue("changedUserId", "")
 					msg = createMenu(chatID, currentOperation[chatID])
 				} else {
 					msg = tgbotapi.NewMessage(chatID, "У вас нет прав на работу с системой MyAlarm")
@@ -724,16 +691,9 @@ func main() {
 					msg = createMenu(chatID, currentOperation[chatID])
 				}
 			} else if update.CallbackQuery.Data == "GetUsersMyAlarm" {
-				currentOperation[chatID] = operation{
-					numberObject:   currentOperation[chatID].numberObject,
-					object:         currentOperation[chatID].object,
-					customers:      currentOperation[chatID].customers,
-					currentRequest: update.CallbackQuery.Data,
-					currentMenu:    currentOperation[chatID].currentMenu,
-					checkPanicId:   currentOperation[chatID].checkPanicId,
-					changedUserId:  "",
-				}
-				msg = getUsersMyAlarm(ctx, client, confSDK, &currentOperation, chatID)
+				currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
+				currentOperation[chatID].changeValue("changedUserId", "")
+				msg = getUsersMyAlarm(ctx, client, confSDK, currentOperation[chatID], chatID)
 				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
 			}
 		}
