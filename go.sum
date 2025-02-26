@@ -1,5 +1,5 @@
-github.com/EkzikP/sdk-andromeda-go v0.0.0-20250213091617-e3bc41e0f8fd h1:BRxzrsJdcmaBmkLvsNDZuKupTkpiMF8Y5+PUsdO2qvA=
-github.com/EkzikP/sdk-andromeda-go v0.0.0-20250213091617-e3bc41e0f8fd/go.mod h1:1vFOd/Lcgl2a3bPRu26m48Ae3FtBX64Y4Hr7Wszj8CE=
+github.com/EkzikP/sdk_andromeda_go_v2 v0.0.0-20250226163915-2fa4fd2b79c1 h1:liRjrEhizjsLvFVKMJB2J6JYMJ/thXzB/fCv1IIiygA=
+github.com/EkzikP/sdk_andromeda_go_v2 v0.0.0-20250226163915-2fa4fd2b79c1/go.mod h1:8Ju3LawxJvcf5zesST3QyQn19Yun7o0GZRnFNRzbTyM=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1 h1:wG8n/XJQ07TmjbITcGiUaOtXxdrINDz1b0J1w0SzqDc=
