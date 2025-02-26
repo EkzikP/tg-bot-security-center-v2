@@ -5,7 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/EkzikP/sdk-andromeda-go"
+	//	"github.com/EkzikP/sdk-andromeda-go"
+	"github.com/EkzikP/sdk_andromeda_go_v2"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/pkg/errors"
 	"log"
@@ -193,7 +194,6 @@ func checkPhone(update *tgbotapi.Update, tgUser *map[int64]string, store UsersSt
 	return false
 }
 
-// addUser добавляет пользователя в users.json
 // requestPhone запрашивает у пользователя номер телефона
 func requestPhone(chatID int64) tgbotapi.MessageConfig {
 

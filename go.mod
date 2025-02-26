@@ -3,7 +3,7 @@ module tg-bot-security-center-v2
 go 1.23.4
 
 require (
-	github.com/EkzikP/sdk-andromeda-go v0.0.0-20250213091617-e3bc41e0f8fd
+	github.com/EkzikP/sdk_andromeda_go_v2 v0.0.0-20250226163915-2fa4fd2b79c1
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	modernc.org/sqlite v1.35.0
 )
