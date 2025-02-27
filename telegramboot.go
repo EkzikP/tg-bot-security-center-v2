@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
+
 	//	"github.com/EkzikP/sdk-andromeda-go"
 	"github.com/EkzikP/sdk_andromeda_go_v2"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -311,8 +313,8 @@ func createMainMenu(chatID int64, operation *operation) tgbotapi.MessageConfig {
 		{"Получить список ответственных лиц объекта", "GetCustomers"},
 		{"Проверка КТС", "ChecksKTS"},
 		{"Управление доступом в MyAlarm", "MyAlarm"},
-		{"Получить список разделов (не сделано)", "Sections"},
-		{"Получить список шлейфов (не сделано)", "Shift"},
+		{"Получить список разделов", "GetParts"},
+		{"Получить список шлейфов", "GetZones"},
 		{"Завершить работу с объектом", "Finish"},
 	}
 
@@ -876,6 +878,79 @@ func getInfoObject(operation operation, chatID int64) tgbotapi.MessageConfig {
 	return msg
 }
 
+func GetParts(operation operation, chatID int64, ctx context.Context, client *andromeda.Client, confSDK andromeda.Config) tgbotapi.MessageConfig {
+
+	getPartsRequest := andromeda.GetPartsInput{
+		SiteId: operation.object.Id,
+		Config: confSDK,
+	}
+
+	getPartsResponse, err := client.GetParts(ctx, getPartsRequest)
+	if err != nil {
+		msg := tgbotapi.NewMessage(chatID, "Не удалось получить данные по объекту")
+		msg.ReplyMarkup = addButtons(operation.currentRequest, false, false)
+		return msg
+	}
+
+	if len(getPartsResponse) == 0 {
+		msg := tgbotapi.NewMessage(chatID, "По объекту нет разделов.")
+		msg.ReplyMarkup = addButtons(operation.currentRequest, false, false)
+		return msg
+	}
+
+	text := ""
+	for _, part := range getPartsResponse {
+		IsStateArm := ""
+		if part.IsStateArm {
+			IsStateArm = "Поставлен на охрану."
+		} else {
+			IsStateArm = "Снят с охраны."
+		}
+		IsStateAlarm := ""
+		if part.IsStateAlarm {
+			IsStateAlarm = "Да."
+		} else {
+			IsStateAlarm = "Нет."
+		}
+
+		date, _ := time.Parse("2006-01-02T15:04:05", part.StateArmDisArmDateTime)
+		dateString := date.Format("02/01/2006 15:04:05")
+		text += fmt.Sprintf("Номер раздела: %d\nОписание раздела: %s\nСостояние раздела: %s\nТревога по разделу: %s\nВремя последнего взятия/снятия: %s\n\n", part.PartNumber, part.PartDesc, IsStateArm, IsStateAlarm, dateString)
+	}
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = addButtons(operation.currentRequest, false, false)
+	return msg
+}
+
+func GetZones(operation operation, chatID int64, ctx context.Context, client *andromeda.Client, confSDK andromeda.Config) tgbotapi.MessageConfig {
+
+	getZonesRequest := andromeda.GetZonesInput{
+		SiteId: operation.object.Id,
+		Config: confSDK,
+	}
+
+	getZonesResponse, err := client.GetZones(ctx, getZonesRequest)
+	if err != nil {
+		msg := tgbotapi.NewMessage(chatID, "Не удалось получить данные по объекту")
+		msg.ReplyMarkup = addButtons(operation.currentRequest, false, false)
+		return msg
+	}
+
+	if len(getZonesResponse) == 0 {
+		msg := tgbotapi.NewMessage(chatID, "По объекту нет шлейфов.")
+		msg.ReplyMarkup = addButtons(operation.currentRequest, false, false)
+		return msg
+	}
+
+	text := ""
+	for _, part := range getZonesResponse {
+		text += fmt.Sprintf("Номер шлейфа: %d\nОписание шлейфа: %s\n\n", part.ZoneNumber, part.ZoneDesc)
+	}
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = addButtons(operation.currentRequest, false, false)
+	return msg
+}
+
 func main() {
 
 	ctx := context.Background()
@@ -1077,6 +1152,14 @@ func main() {
 			case "GetInfoObject":
 				currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
 				msg = getInfoObject(*currentOperation[chatID], chatID)
+				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
+			case "GetParts":
+				currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
+				msg = GetParts(*currentOperation[chatID], chatID, ctx, client, confSDK)
+				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
+			case "GetZones":
+				currentOperation[chatID].changeValue("currentRequest", update.CallbackQuery.Data)
+				msg = GetZones(*currentOperation[chatID], chatID, ctx, client, confSDK)
 				msg.ReplyToMessageID = update.CallbackQuery.Message.MessageID
 			default:
 				switch currentOperation[chatID].currentRequest {
