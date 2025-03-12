@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	//	"github.com/EkzikP/sdk-andromeda-go"
 	"github.com/EkzikP/sdk_andromeda_go_v2"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/pkg/errors"
@@ -250,7 +249,7 @@ func checkUserRights(object andromeda.GetSitesResponse, operation *operation, ch
 		Config: confSDK,
 	}
 
-	getCustomersResponse, err := client.Customers(*ctx, getCustomersRequest)
+	getCustomersResponse, err := client.GetCustomers(*ctx, getCustomersRequest)
 	if err != nil {
 		return false
 	}
